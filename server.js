@@ -1,12 +1,26 @@
-const { exec } = require('child_process');
+const { createServer } = require('http');
+const { parse } = require('url');
+const next = require('next');
 
-// cPanel automatically injects the correct port into process.env.PORT
+// Force production mode for cPanel
+const dev = false;
+const hostname = 'localhost';
 const port = process.env.PORT || 3000;
 
-console.log(`Starting development server on port ${port}...`);
+const app = next({ dev, hostname, port });
+const handle = app.getRequestHandler();
 
-// This runs your exact local command on the server
-const server = exec(`npm run dev -- --port ${port}`);
-
-server.stdout.on('data', (data) => console.log(data));
-server.stderr.on('data', (data) => console.error(data));
+app.prepare().then(() => {
+  createServer(async (req, res) => {
+    try {
+      const parsedUrl = parse(req.url, true);
+      await handle(req, res, parsedUrl);
+    } catch (err) {
+      console.error('Error handling request:', err);
+      res.statusCode = 500;
+      res.end('Internal server error');
+    }
+  }).listen(port, () => {
+    console.log(`> Ready on http://${hostname}:${port}`);
+  });
+});
