@@ -3,7 +3,7 @@ import { DashboardClient } from "./DashboardClient";
 
 export const metadata = { title: "Dashboard" };
 
-async function getDashboardStats(supabase: ReturnType<typeof createServerClient>) {
+async function getDashboardStats(supabase: Awaited<ReturnType<typeof createServerClient>>) {
   const today = new Date().toISOString().slice(0, 10);
   const monthStart = today.slice(0, 7) + "-01";
 
@@ -19,8 +19,8 @@ async function getDashboardStats(supabase: ReturnType<typeof createServerClient>
       .in("status", ["confirmed", "delivered"]),
   ]);
 
-  const todayEggs = (eggs.data ?? []).reduce((s, r) => s + (r.total_eggs_laid ?? 0), 0);
-  const monthRevenue = (revenue.data ?? []).reduce((s, r) => s + (r.total_amount ?? 0), 0);
+  const todayEggs = ((eggs.data ?? []) as { total_eggs_laid: number | null }[]).reduce((s, r) => s + (r.total_eggs_laid ?? 0), 0);
+  const monthRevenue = ((revenue.data ?? []) as { total_amount: number | null }[]).reduce((s, r) => s + (r.total_amount ?? 0), 0);
 
   return {
     farmers: farmers.count ?? 0,
@@ -31,7 +31,7 @@ async function getDashboardStats(supabase: ReturnType<typeof createServerClient>
   };
 }
 
-async function getRecentOrders(supabase: ReturnType<typeof createServerClient>) {
+async function getRecentOrders(supabase: Awaited<ReturnType<typeof createServerClient>>) {
   const { data } = await supabase
     .from("sales_orders")
     .select(`
@@ -43,7 +43,7 @@ async function getRecentOrders(supabase: ReturnType<typeof createServerClient>) 
   return data ?? [];
 }
 
-async function getWardActivity(supabase: ReturnType<typeof createServerClient>) {
+async function getWardActivity(supabase: Awaited<ReturnType<typeof createServerClient>>) {
   const { data } = await supabase
     .from("mv_ward_sales_daily")
     .select("ward_id, sale_date, total_revenue, orders_count")

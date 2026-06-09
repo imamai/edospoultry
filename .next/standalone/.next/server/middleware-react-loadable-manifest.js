@@ -1,0 +1,1 @@
+self.__REACT_LOADABLE_MANIFEST='{"app\\\\(dashboard)\\\\dispatch\\\\DispatchClient.tsx -> leaflet":{"id":60759,"files":["static/chunks/d0deef33.414f5e0355024f0b.js"]},"app\\\\(dashboard)\\\\dispatch\\\\DispatchClient.tsx -> leaflet/dist/leaflet.css":{"id":35046,"files":["static/css/fc1c9daac70c093b.css","static/chunks/46.fe80926032d08ec5.js"]}}';

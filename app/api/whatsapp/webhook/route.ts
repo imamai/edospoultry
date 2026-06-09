@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import twilio from "twilio";
 
-const client = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+function getClient() {
+  return twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+}
 
 interface FarmerRecord {
   id: string;
@@ -37,7 +39,7 @@ const PRICES = { broiler: 80, layer: 90, kienyeji: 120 };
 const CHICK_TYPES = { "1": "broiler", "2": "layer", "3": "kienyeji" } as Record<string, keyof typeof PRICES>;
 
 async function sendWhatsApp(to: string, body: string) {
-  await client.messages.create({
+  await getClient().messages.create({
     from: process.env.TWILIO_WHATSAPP_NUMBER!,
     to,
     body,
