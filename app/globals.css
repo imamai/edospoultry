@@ -1,0 +1,100 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 142 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 142 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 142 47% 11%;
+    --primary: 142 76% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 142 29% 94%;
+    --secondary-foreground: 142 47% 20%;
+    --muted: 142 10% 95%;
+    --muted-foreground: 142 15% 45%;
+    --accent: 43 96% 56%;
+    --accent-foreground: 43 96% 10%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 142 20% 90%;
+    --input: 142 20% 90%;
+    --ring: 142 76% 36%;
+    --radius: 0.75rem;
+  }
+  .dark {
+    --background: 142 47% 6%;
+    --foreground: 142 10% 95%;
+    --card: 142 40% 9%;
+    --card-foreground: 142 10% 95%;
+    --popover: 142 40% 9%;
+    --popover-foreground: 142 10% 95%;
+    --primary: 142 76% 36%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 142 30% 15%;
+    --secondary-foreground: 142 10% 90%;
+    --muted: 142 25% 15%;
+    --muted-foreground: 142 15% 60%;
+    --accent: 43 96% 56%;
+    --accent-foreground: 43 96% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 142 25% 18%;
+    --input: 142 25% 18%;
+    --ring: 142 76% 36%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Shimmer skeleton */
+.skeleton {
+  @apply bg-muted relative overflow-hidden rounded;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255,255,255,0.5) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
+}
+
+/* Page transition wrapper */
+.page-enter { @apply animate-fade-in; }
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { @apply bg-muted/30; }
+::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-muted-foreground/30; }
+
+/* Stat card hover */
+.stat-card {
+  @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card-hover cursor-pointer;
+}
+
+/* Status pill */
+.status-pill {
+  @apply inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+/* Mapbox overrides */
+.mapboxgl-canvas { border-radius: 0.75rem; }
