@@ -1,0 +1,6 @@
+---
+deployment:
+  tasks:
+    - export NODEVENV=/home/sehigvkd/nodevenv/edoshutch/20
+    - export PATH=$NODEVENV/bin:$PATH
+    - cd /home/sehigvkd/edoshutch/.next/standalone && npm install --production
