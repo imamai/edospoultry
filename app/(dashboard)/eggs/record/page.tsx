@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,65 +12,114 @@ import { createClient } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ConfettiBlast } from "@/components/shared/ConfettiBlast";
 
+const today = new Date().toISOString().slice(0, 10);
+
 const schema = z.object({
-  layer_flock_id: z.string().uuid("Select a layer flock"),
-  record_date: z.string(),
-  grade_a_count: z.coerce.number().int().min(0),
-  grade_b_count: z.coerce.number().int().min(0),
-  grade_c_count: z.coerce.number().int().min(0),
-  hatching_count: z.coerce.number().int().min(0),
-  cracked_count: z.coerce.number().int().min(0),
-  dirty_count: z.coerce.number().int().min(0),
-  feed_consumed_kg: z.coerce.number().min(0),
+  flock_id: z.string().uuid("Select a flock"),
+  production_date: z.string()
+    .min(1, "Production date is required")
+    .refine(v => v <= today, "Date cannot be in the future"),
+  hen_count: z.coerce.number().int().min(1, "Enter hen count"),
+  grade_a_count: z.coerce.number().int().min(0, "Cannot be negative"),
+  grade_b_count: z.coerce.number().int().min(0, "Cannot be negative"),
+  grade_c_count: z.coerce.number().int().min(0, "Cannot be negative"),
+  hatching_eggs: z.coerce.number().int().min(0, "Cannot be negative"),
+  cracked_eggs: z.coerce.number().int().min(0, "Cannot be negative"),
+  dirty_eggs: z.coerce.number().int().min(0, "Cannot be negative"),
+  feed_consumption_kg: z.coerce.number().min(0),
 });
 type FormData = z.infer<typeof schema>;
 
+interface FlockOption {
+  id: string;
+  flock_code: string | null;
+  farmer_id: string;
+  current_quantity: number;
+  farmers: { full_name: string } | null;
+}
+
 export default function RecordEggsPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [saving, setSaving] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
-  const [flocks, setFlocks] = useState<{ id: string; flock_name: string; active_hen_count: number }[]>([]);
+  const [flocks, setFlocks] = useState<FlockOption[]>([]);
+  const [profile, setProfile] = useState<{ id: string; organization_id: string } | null>(null);
 
   useEffect(() => {
-    supabase
-      .from("layer_flocks")
-      .select("id, flock_name, active_hen_count")
-      .eq("status", "active")
-      .then(({ data }) => setFlocks(data ?? []));
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, organization_id")
+        .eq("id", user.id)
+        .single();
+      if (data) setProfile(data as { id: string; organization_id: string });
+    });
+
+    fetch("/api/flocks/options")
+      .then(r => r.json())
+      .then(data => setFlocks((data ?? []) as FlockOption[]));
   }, [supabase]);
 
   const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      record_date: new Date().toISOString().slice(0, 10),
+      production_date: today,
       grade_a_count: 0, grade_b_count: 0, grade_c_count: 0,
-      hatching_count: 0, cracked_count: 0, dirty_count: 0, feed_consumed_kg: 0,
+      hatching_eggs: 0, cracked_eggs: 0, dirty_eggs: 0, feed_consumption_kg: 0,
     },
   });
 
   const values = watch();
-  const totalEggs = (values.grade_a_count || 0) + (values.grade_b_count || 0) +
-    (values.grade_c_count || 0) + (values.hatching_count || 0) +
-    (values.cracked_count || 0) + (values.dirty_count || 0);
+  const totalEggs = Number(values.grade_a_count || 0) + Number(values.grade_b_count || 0) +
+    Number(values.grade_c_count || 0) + Number(values.hatching_eggs || 0) +
+    Number(values.cracked_eggs || 0) + Number(values.dirty_eggs || 0);
 
-  const selectedFlock = flocks.find(f => f.id === values.layer_flock_id);
-  const hdp = selectedFlock?.active_hen_count
-    ? ((totalEggs / selectedFlock.active_hen_count) * 100).toFixed(1)
-    : null;
+  const henCount = Number(values.hen_count || 0);
+  const hdp = henCount > 0 ? ((totalEggs / henCount) * 100).toFixed(1) : null;
 
   async function onSubmit(data: FormData) {
+    if (!profile) { toast.error("Session not ready — please refresh"); return; }
+    const selectedFlock = flocks.find(f => f.id === data.flock_id);
+    if (!selectedFlock) { toast.error("Select a valid flock"); return; }
+    if (totalEggs === 0) { toast.error("Enter at least one egg count before saving"); return; }
+
+    // Check for duplicate record (same flock + date)
+    const dupRes = await fetch(`/api/eggs/check-duplicate?flock_id=${data.flock_id}&date=${data.production_date}`);
+    const { exists } = await dupRes.json();
+    if (exists) {
+      toast.error(`A record for this flock on ${data.production_date} already exists`);
+      return;
+    }
+
+    const saleableEggs = Number(data.grade_a_count) + Number(data.grade_b_count) +
+      Number(data.grade_c_count) + Number(data.hatching_eggs);
+    const henDayProduction = data.hen_count > 0
+      ? (totalEggs / data.hen_count) * 100
+      : 0;
+
     setSaving(true);
     const { error } = await supabase.from("egg_production_records").insert({
-      layer_flock_id: data.layer_flock_id,
-      record_date: data.record_date,
+      organization_id: profile.organization_id,
+      flock_id: data.flock_id,
+      farmer_id: selectedFlock.farmer_id,
+      production_date: data.production_date,
+      morning_collection: totalEggs,
+      afternoon_collection: 0,
+      total_eggs_laid: totalEggs,
+      saleable_eggs: saleableEggs,
+      hen_day_production: henDayProduction,
+      hen_count: data.hen_count,
       grade_a_count: data.grade_a_count,
       grade_b_count: data.grade_b_count,
       grade_c_count: data.grade_c_count,
-      hatching_count: data.hatching_count,
-      cracked_count: data.cracked_count,
-      dirty_count: data.dirty_count,
-      feed_consumed_kg: data.feed_consumed_kg,
+      hatching_eggs: data.hatching_eggs,
+      cracked_eggs: data.cracked_eggs,
+      dirty_eggs: data.dirty_eggs,
+      feed_consumption_kg: data.feed_consumption_kg || null,
+      mortality_count: 0,
+      recorded_by: profile.id,
     });
     setSaving(false);
     if (error) {
@@ -105,24 +154,33 @@ export default function RecordEggsPage() {
       >
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
-            <label className={label}>Layer Flock *</label>
-            <select {...register("layer_flock_id")} className={field}>
+            <label className={label}>Layer / Dual-Purpose Flock *</label>
+            <select {...register("flock_id")} className={field}>
               <option value="">Select flock…</option>
               {flocks.map(f => (
-                <option key={f.id} value={f.id}>{f.flock_name} ({f.active_hen_count} hens)</option>
+                <option key={f.id} value={f.id}>
+                  {f.flock_code ?? f.id.slice(0, 8)} — {(f.farmers as { full_name: string } | null)?.full_name ?? "Unknown"}
+                </option>
               ))}
             </select>
-            {errors.layer_flock_id && <p className="mt-1 text-xs text-destructive">{errors.layer_flock_id.message}</p>}
+            {errors.flock_id && <p className="mt-1 text-xs text-destructive">{errors.flock_id.message}</p>}
           </div>
 
           <div>
-            <label className={label}>Record Date *</label>
-            <input type="date" {...register("record_date")} className={field} />
+            <label className={label}>Production Date *</label>
+            <input type="date" max={today} {...register("production_date")} className={field} />
+            {errors.production_date && <p className="mt-1 text-xs text-destructive">{errors.production_date.message}</p>}
+          </div>
+
+          <div>
+            <label className={label}>Hen Count *</label>
+            <input type="number" min="1" placeholder="e.g. 500" {...register("hen_count")} className={field} />
+            {errors.hen_count && <p className="mt-1 text-xs text-destructive">{errors.hen_count.message}</p>}
           </div>
 
           <div>
             <label className={label}>Feed Consumed (kg)</label>
-            <input type="number" step="0.1" min="0" {...register("feed_consumed_kg")} className={field} />
+            <input type="number" step="0.1" min="0" {...register("feed_consumption_kg")} className={field} />
           </div>
         </div>
 
@@ -133,19 +191,19 @@ export default function RecordEggsPage() {
               { name: "grade_a_count" as const, label: "Grade A", color: "text-green-700" },
               { name: "grade_b_count" as const, label: "Grade B", color: "text-amber-700" },
               { name: "grade_c_count" as const, label: "Grade C", color: "text-orange-700" },
-              { name: "hatching_count" as const, label: "Hatching", color: "text-blue-700" },
-              { name: "cracked_count" as const, label: "Cracked", color: "text-red-600" },
-              { name: "dirty_count" as const, label: "Dirty", color: "text-gray-600" },
+              { name: "hatching_eggs" as const, label: "Hatching", color: "text-blue-700" },
+              { name: "cracked_eggs" as const, label: "Cracked", color: "text-red-600" },
+              { name: "dirty_eggs" as const, label: "Dirty", color: "text-gray-600" },
             ].map(({ name, label: lbl, color }) => (
               <div key={name}>
                 <label className={`${label} ${color}`}>{lbl}</label>
                 <input type="number" min="0" {...register(name)} className={field} />
+                {errors[name] && <p className="mt-1 text-xs text-destructive">{errors[name]?.message}</p>}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Live preview */}
         {totalEggs > 0 && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -171,7 +229,7 @@ export default function RecordEggsPage() {
           </Link>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || !profile}
             className="flex-1 py-2.5 rounded-xl bg-edos-600 hover:bg-edos-700 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
           >
             {saving && <Loader2 size={15} className="animate-spin" />}

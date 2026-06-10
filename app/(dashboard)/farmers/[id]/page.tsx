@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { createServerClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { formatDate, formatNumber, formatPhone, getBirdCategoryColor } from "@/lib/utils";
@@ -14,21 +14,21 @@ export async function generateMetadata({ params }: { params: { id: string } }) {
 }
 
 type WardRow = {
-  ward_name: string;
-  subcounties?: { subcounty_name: string; counties?: { county_name: string } | null } | null;
+  name: string;
+  subcounties?: { name: string; counties?: { name: string } | null } | null;
 };
 
 export default async function FarmerDetailPage({ params }: { params: { id: string } }) {
-  const supabase = await createServerClient();
+  const supabase = createServiceClient();
 
   const { data: farmer } = await supabase
     .from("farmers")
     .select(`
-      id, full_name, phone_number, national_id, is_verified,
+      id, full_name, phone_number, id_number, is_active,
       preferred_language, preferred_channel, created_at, notes,
-      wards(ward_name,
-        subcounties(subcounty_name,
-          counties(county_name)
+      wards(name,
+        subcounties(name,
+          counties(name)
         )
       )
     `)
@@ -40,7 +40,7 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
   const [flocksRes, ordersRes, claimsRes, vaccsRes, eggsRes] = await Promise.all([
     supabase
       .from("farmer_flocks")
-      .select("id, flock_name, bird_category, flock_purpose, current_count, status")
+      .select("id, flock_code, bird_category, purpose, current_quantity, status")
       .eq("farmer_id", params.id)
       .order("created_at", { ascending: false }),
     supabase
@@ -51,21 +51,21 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
       .limit(10),
     supabase
       .from("mortality_claims")
-      .select("id, reported_count, approved_count, claim_status, created_at")
+      .select("id, claimed_deaths, actual_deaths, status, created_at")
       .eq("farmer_id", params.id)
       .order("created_at", { ascending: false })
       .limit(10),
     supabase
       .from("vaccination_schedules")
-      .select("id, vaccine_name, scheduled_date, administered_date, status")
+      .select("id, vaccine_type, scheduled_date, completed_date")
       .eq("farmer_id", params.id)
       .order("scheduled_date", { ascending: false })
       .limit(10),
     supabase
       .from("egg_production_records")
-      .select("id, record_date, total_eggs_laid, saleable_eggs, hen_day_production")
+      .select("id, production_date, total_eggs_laid, saleable_eggs, hen_day_production")
       .eq("farmer_id", params.id)
-      .order("record_date", { ascending: false })
+      .order("production_date", { ascending: false })
       .limit(7),
   ]);
 
@@ -77,8 +77,8 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
 
   const ward = farmer.wards as WardRow | null;
   const activeFlocks = flocks.filter(f => f.status === "active").length;
-  const totalBirds = flocks.reduce((s, f) => s + (f.current_count ?? 0), 0);
-  const pendingClaims = claims.filter(c => c.claim_status === "pending").length;
+  const totalBirds = flocks.reduce((s, f) => s + (f.current_quantity ?? 0), 0);
+  const pendingClaims = claims.filter(c => c.status === "submitted" || c.status === "under_review").length;
 
   const stats = [
     { label: "Active Flocks",   value: activeFlocks,    icon: Bird,          color: "text-edos-600",  bg: "bg-edos-50" },
@@ -114,10 +114,10 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
           </div>
 
           <div className="space-y-2 text-sm">
-            {farmer.national_id && (
+            {farmer.id_number && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <User size={13} className="shrink-0" />
-                <span>ID: {farmer.national_id}</span>
+                <span>ID: {farmer.id_number}</span>
               </div>
             )}
             {farmer.phone_number && (
@@ -130,8 +130,8 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
               <div className="flex items-start gap-2 text-muted-foreground">
                 <MapPin size={13} className="shrink-0 mt-0.5" />
                 <span>
-                  {ward.ward_name}, {ward.subcounties?.subcounty_name},{" "}
-                  {ward.subcounties?.counties?.county_name}
+                  {ward.name}, {ward.subcounties?.name},{" "}
+                  {ward.subcounties?.counties?.name}
                 </span>
               </div>
             )}
@@ -146,14 +146,14 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
           <div className="flex items-center justify-between pt-3 border-t border-border">
             <span
               className={`status-pill ${
-                farmer.is_verified
+                farmer.is_active
                   ? "bg-green-100 text-green-800"
                   : "bg-amber-100 text-amber-800"
               }`}
             >
-              {farmer.is_verified ? (
-                <span className="flex items-center gap-1"><CheckCircle2 size={11} /> Verified</span>
-              ) : "Pending verification"}
+              {farmer.is_active ? (
+                <span className="flex items-center gap-1"><CheckCircle2 size={11} /> Active</span>
+              ) : "Inactive"}
             </span>
             <span className="text-xs text-muted-foreground">{formatDate(farmer.created_at)}</span>
           </div>
@@ -194,19 +194,19 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
                   href={`/flocks/${flock.id}`}
                   className="text-sm font-medium text-edos-700 hover:underline truncate block"
                 >
-                  {flock.flock_name}
+                  {flock.flock_code ?? flock.id.slice(0, 8)}
                 </Link>
                 <p className="text-xs text-muted-foreground capitalize mt-0.5">
                   <span className={`status-pill text-[10px] py-0 ${getBirdCategoryColor(flock.bird_category)}`}>
                     {flock.bird_category?.replace(/_/g, " ")}
                   </span>
-                  {flock.flock_purpose && (
-                    <span className="ml-1">&middot; {flock.flock_purpose.replace(/_/g, " ")}</span>
+                  {flock.purpose && (
+                    <span className="ml-1">&middot; {flock.purpose.replace(/_/g, " ")}</span>
                   )}
                 </p>
               </div>
               <div className="text-right shrink-0 ml-3 space-y-1">
-                <p className="text-sm font-mono font-semibold">{formatNumber(flock.current_count ?? 0)} birds</p>
+                <p className="text-sm font-mono font-semibold">{formatNumber(flock.current_quantity ?? 0)} birds</p>
                 <StatusBadge status={flock.status ?? "active"} />
               </div>
             </div>
@@ -251,13 +251,13 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
               <div className="min-w-0">
                 <p className="text-sm font-medium">{formatDate(claim.created_at)}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Reported: {formatNumber(claim.reported_count ?? 0)} birds
-                  {claim.approved_count
-                    ? ` · Approved: ${formatNumber(claim.approved_count)}`
+                  Reported: {formatNumber(claim.claimed_deaths ?? 0)} birds
+                  {claim.actual_deaths
+                    ? ` · Approved: ${formatNumber(claim.actual_deaths)}`
                     : ""}
                 </p>
               </div>
-              <StatusBadge status={claim.claim_status ?? "pending"} />
+              <StatusBadge status={claim.status ?? "submitted"} />
             </div>
           ))}
         </ServiceSection>
@@ -272,15 +272,15 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
           {vaccinations.slice(0, 5).map((v, i) => (
             <div key={i} className="flex items-center justify-between py-2.5 border-b border-border last:border-0">
               <div className="min-w-0">
-                <p className="text-sm font-medium">{v.vaccine_name}</p>
+                <p className="text-sm font-medium">{v.vaccine_type}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Scheduled: {formatDate(v.scheduled_date)}
-                  {v.administered_date
-                    ? ` · Done: ${formatDate(v.administered_date)}`
+                  {v.completed_date
+                    ? ` · Done: ${formatDate(v.completed_date)}`
                     : ""}
                 </p>
               </div>
-              <StatusBadge status={v.status ?? "scheduled"} />
+              <StatusBadge status={v.completed_date ? "completed" : "scheduled"} />
             </div>
           ))}
         </ServiceSection>
@@ -307,7 +307,7 @@ export default async function FarmerDetailPage({ params }: { params: { id: strin
               <tbody className="divide-y divide-border">
                 {eggs.map(r => (
                   <tr key={r.id} className="hover:bg-muted/20">
-                    <td className="px-4 py-3">{formatDate(r.record_date)}</td>
+                    <td className="px-4 py-3">{formatDate(r.production_date)}</td>
                     <td className="px-4 py-3 font-mono">{formatNumber(r.total_eggs_laid ?? 0)}</td>
                     <td className="px-4 py-3 font-mono text-green-700">{formatNumber(r.saleable_eggs ?? 0)}</td>
                     <td className="px-4 py-3 font-mono">{r.hen_day_production?.toFixed(1) ?? "—"}%</td>

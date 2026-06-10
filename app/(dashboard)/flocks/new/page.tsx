@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -13,48 +13,63 @@ import { PageHeader } from "@/components/shared/PageHeader";
 
 const schema = z.object({
   farmer_id: z.string().uuid("Select a farmer"),
-  flock_name: z.string().min(2, "Minimum 2 characters"),
+  flock_code: z.string().min(2, "Minimum 2 characters"),
   bird_category: z.enum(["broiler", "layer", "dual_purpose", "indigenous", "breeder", "turkey", "duck", "quail", "guinea_fowl"]),
-  flock_purpose: z.enum(["commercial", "subsistence", "both"]),
-  initial_count: z.coerce.number().int().min(1, "Must be at least 1"),
-  house_type: z.enum(["open_sided", "closed", "deep_litter", "cage", "free_range", "semi_intensive"]),
+  purpose: z.enum(["meat", "eggs", "breeding", "replacement", "dual_purpose"]),
+  initial_quantity: z.coerce.number().int().min(1, "Must be at least 1"),
+  placement_date: z.string().min(1, "Placement date required"),
   notes: z.string().optional(),
 });
 type FormData = z.infer<typeof schema>;
 
 export default function NewFlockPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [saving, setSaving] = useState(false);
-  const [farmers, setFarmers] = useState<{ id: string; full_name: string; phone_number: string }[]>([]);
+  const [farmers, setFarmers] = useState<{ id: string; full_name: string; phone_number: string; id_number: string | null }[]>([]);
   const [farmerQuery, setFarmerQuery] = useState("");
+  const [selectedFarmer, setSelectedFarmer] = useState<{ id: string; full_name: string; phone_number: string; id_number: string | null } | null>(null);
+  const [profile, setProfile] = useState<{ id: string; organization_id: string } | null>(null);
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("id, organization_id")
+        .eq("id", user.id)
+        .single();
+      if (data) setProfile(data as { id: string; organization_id: string });
+    });
+  }, [supabase]);
+
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { bird_category: "layer", flock_purpose: "commercial", house_type: "deep_litter" },
+    defaultValues: { bird_category: "layer", purpose: "eggs", placement_date: new Date().toISOString().split("T")[0] },
   });
 
   async function searchFarmers(q: string) {
     setFarmerQuery(q);
-    if (q.length < 2) return;
-    const { data } = await supabase
-      .from("farmers")
-      .select("id, full_name, phone_number")
-      .ilike("full_name", `%${q}%`)
-      .limit(10);
-    setFarmers(data ?? []);
+    setSelectedFarmer(null);
+    setValue("farmer_id", "");
+    if (q.length < 3) { setFarmers([]); return; }
+    const res = await fetch(`/api/farmers/search?q=${encodeURIComponent(q)}`);
+    if (res.ok) setFarmers(await res.json());
   }
 
   async function onSubmit(data: FormData) {
+    if (!profile) { toast.error("Profile not loaded — please refresh"); return; }
     setSaving(true);
     const { error } = await supabase.from("farmer_flocks").insert({
+      organization_id: profile.organization_id,
       farmer_id: data.farmer_id,
-      flock_name: data.flock_name,
+      flock_code: data.flock_code,
       bird_category: data.bird_category,
-      flock_purpose: data.flock_purpose,
-      initial_count: data.initial_count,
-      current_count: data.initial_count,
-      house_type: data.house_type,
+      purpose: data.purpose,
+      initial_quantity: data.initial_quantity,
+      current_quantity: data.initial_quantity,
+      placement_date: data.placement_date,
+      vaccination_status: {},
       notes: data.notes,
       status: "active",
     });
@@ -93,7 +108,7 @@ export default function NewFlockPage() {
           <label className={label}>Farmer *</label>
           <input
             type="text"
-            placeholder="Search by name…"
+            placeholder="Search by ID number, name, or phone…"
             value={farmerQuery}
             onChange={e => searchFarmers(e.target.value)}
             className={field}
@@ -104,13 +119,29 @@ export default function NewFlockPage() {
                 <button
                   key={f.id}
                   type="button"
-                  onClick={() => { setFarmerQuery(f.full_name); setFarmers([]); }}
+                  onClick={() => {
+                    setFarmerQuery(f.full_name);
+                    setFarmers([]);
+                    setSelectedFarmer(f);
+                    setValue("farmer_id", f.id, { shouldValidate: true });
+                  }}
                   className="w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
                 >
                   <span className="font-medium">{f.full_name}</span>
-                  <span className="text-muted-foreground text-xs">{f.phone_number}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {f.id_number ? `ID: ${f.id_number}` : f.phone_number}
+                  </span>
                 </button>
               ))}
+            </div>
+          )}
+          {selectedFarmer && (
+            <div className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-edos-50 border border-edos-200 text-sm">
+              <span className="font-medium text-edos-800">{selectedFarmer.full_name}</span>
+              {selectedFarmer.id_number
+                ? <span className="text-edos-600 text-xs">ID: {selectedFarmer.id_number}</span>
+                : <span className="text-edos-600 text-xs">{selectedFarmer.phone_number}</span>
+              }
             </div>
           )}
           <input type="hidden" {...register("farmer_id")} />
@@ -118,9 +149,9 @@ export default function NewFlockPage() {
         </div>
 
         <div>
-          <label className={label}>Flock Name *</label>
-          <input placeholder="e.g. Batch A — Broilers 2024" {...register("flock_name")} className={field} />
-          {errors.flock_name && <p className={err}>{errors.flock_name.message}</p>}
+          <label className={label}>Flock Code / Name *</label>
+          <input placeholder="e.g. Batch A — Broilers 2024" {...register("flock_code")} className={field} />
+          {errors.flock_code && <p className={err}>{errors.flock_code.message}</p>}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -134,27 +165,26 @@ export default function NewFlockPage() {
           </div>
           <div>
             <label className={label}>Purpose *</label>
-            <select {...register("flock_purpose")} className={field}>
-              <option value="commercial">Commercial</option>
-              <option value="subsistence">Subsistence</option>
-              <option value="both">Both</option>
+            <select {...register("purpose")} className={field}>
+              <option value="eggs">Eggs</option>
+              <option value="meat">Meat</option>
+              <option value="breeding">Breeding</option>
+              <option value="replacement">Replacement</option>
+              <option value="dual_purpose">Dual Purpose</option>
             </select>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className={label}>Initial Count *</label>
-            <input type="number" min="1" placeholder="500" {...register("initial_count")} className={field} />
-            {errors.initial_count && <p className={err}>{errors.initial_count.message}</p>}
+            <label className={label}>Initial Quantity *</label>
+            <input type="number" min="1" placeholder="500" {...register("initial_quantity")} className={field} />
+            {errors.initial_quantity && <p className={err}>{errors.initial_quantity.message}</p>}
           </div>
           <div>
-            <label className={label}>Housing Type *</label>
-            <select {...register("house_type")} className={field}>
-              {["open_sided","closed","deep_litter","cage","free_range","semi_intensive"].map(h => (
-                <option key={h} value={h}>{h.replace(/_/g, " ")}</option>
-              ))}
-            </select>
+            <label className={label}>Placement Date *</label>
+            <input type="date" {...register("placement_date")} className={field} />
+            {errors.placement_date && <p className={err}>{errors.placement_date.message}</p>}
           </div>
         </div>
 
@@ -172,7 +202,7 @@ export default function NewFlockPage() {
           </Link>
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || !profile}
             className="flex-1 py-2.5 rounded-xl bg-edos-600 hover:bg-edos-700 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
           >
             {saving && <Loader2 size={15} className="animate-spin" />}

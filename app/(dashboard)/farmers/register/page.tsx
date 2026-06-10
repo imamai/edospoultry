@@ -19,7 +19,7 @@ import { sanitizePhone } from "@/lib/utils";
 const schema = z.object({
   full_name:        z.string().min(2, "Full name required"),
   phone_number:     z.string().min(9, "Valid phone number required"),
-  national_id:      z.string().optional(),
+  national_id:      z.string().min(4, "National ID is required"),
   county_id:        z.string().min(1, "Select a county"),
   subcounty_id:     z.string().optional(),
   ward_id:          z.string().optional(),
@@ -47,6 +47,7 @@ export default function RegisterFarmerPage() {
   const [wards,             setWards]             = useState<Ward[]>([]);
   const [countySelected,    setCountySelected]    = useState(false);
   const [subcountySelected, setSubcountySelected] = useState(false);
+  const [profileLoading,    setProfileLoading]    = useState(true);
   const [profile,           setProfile]           = useState<{ id: string; organization_id: string } | null>(null);
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
@@ -56,13 +57,18 @@ export default function RegisterFarmerPage() {
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
-      const { data } = await supabase
+      if (!user) { setProfileLoading(false); toast.error("Not signed in — please log in again"); return; }
+      const { data, error } = await supabase
         .from("profiles")
         .select("id, organization_id")
         .eq("id", user.id)
         .single();
-      if (data) setProfile(data as { id: string; organization_id: string });
+      setProfileLoading(false);
+      if (error || !data) {
+        toast.error("Could not load your profile — please refresh or log in again");
+        return;
+      }
+      setProfile(data as { id: string; organization_id: string });
     });
 
     supabase
@@ -157,19 +163,31 @@ export default function RegisterFarmerPage() {
   async function onSubmit(data: FormData) {
     if (!profile) { toast.error("Session not ready — please wait"); return; }
     setSaving(true);
+
+    // Check for duplicate ID number before inserting
+    const checkRes = await fetch(`/api/farmers/check-id?id=${encodeURIComponent(data.national_id)}`);
+    const { exists, farmer } = await checkRes.json();
+    if (exists) {
+      setSaving(false);
+      toast.error(`ID ${data.national_id} is already registered to: ${farmer.full_name}`);
+      return;
+    }
+
     const phone = sanitizePhone(data.phone_number);
 
     const insertPayload: Record<string, unknown> = {
-      full_name:          data.full_name,
-      phone_number:       phone,
-      id_number:          data.national_id || null,
-      county_id:          data.county_id    ? parseInt(data.county_id)    : null,
-      subcounty_id:       data.subcounty_id ? parseInt(data.subcounty_id) : null,
-      ward_id:            data.ward_id      ? parseInt(data.ward_id)      : null,
-      organization_id:    profile.organization_id,
-      registered_by:      profile.id,
-      preferred_language: data.preferred_language,
-      preferred_channel:  data.preferred_channel,
+      full_name:           data.full_name,
+      phone_number:        phone,
+      id_number:           data.national_id || null,
+      county_id:           data.county_id    ? parseInt(data.county_id)    : null,
+      subcounty_id:        data.subcounty_id ? parseInt(data.subcounty_id) : null,
+      ward_id:             data.ward_id      ? parseInt(data.ward_id)      : null,
+      organization_id:     profile.organization_id,
+      registered_by:       profile.id,
+      preferred_language:  data.preferred_language,
+      preferred_channel:   data.preferred_channel,
+      is_active:           true,
+      whatsapp_opted_in:   false,
     };
 
     // DB stores GPS as PostGIS geometry — use EWKT format
@@ -181,7 +199,11 @@ export default function RegisterFarmerPage() {
     const { error } = await supabase.from("farmers").insert(insertPayload);
     setSaving(false);
     if (error) {
-      toast.error(error.message);
+      if (error.code === "23505") {
+        toast.error(`Duplicate record — a farmer with this ID number or phone is already registered`);
+      } else {
+        toast.error(error.message);
+      }
     } else {
       setSuccess(true);
       toast.success(`${data.full_name} registered successfully!`);
@@ -223,8 +245,9 @@ export default function RegisterFarmerPage() {
             {errors.phone_number && <p className={errCls}>{errors.phone_number.message}</p>}
           </div>
           <div>
-            <label className={lbl}>National ID</label>
+            <label className={lbl}>National ID *</label>
             <input placeholder="12345678" {...register("national_id")} className={f} />
+            {errors.national_id && <p className={errCls}>{errors.national_id.message}</p>}
           </div>
         </div>
 
@@ -322,11 +345,11 @@ export default function RegisterFarmerPage() {
           </Link>
           <button
             type="submit"
-            disabled={saving || !profile}
+            disabled={saving || profileLoading || !profile}
             className="flex-1 py-2.5 rounded-xl bg-edos-600 hover:bg-edos-700 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-70"
           >
-            {saving && <Loader2 size={15} className="animate-spin" />}
-            {saving ? "Registering…" : "Register Farmer"}
+            {(saving || profileLoading) && <Loader2 size={15} className="animate-spin" />}
+            {profileLoading ? "Loading…" : saving ? "Registering…" : !profile ? "Session error — refresh" : "Register Farmer"}
           </button>
         </div>
       </motion.form>

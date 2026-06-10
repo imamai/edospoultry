@@ -1,4 +1,4 @@
-import { createServerClient } from "@/lib/supabase/server";
+import { createServiceClient, getOrgContext } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { formatDate, formatNumber } from "@/lib/utils";
@@ -6,34 +6,42 @@ import { formatDate, formatNumber } from "@/lib/utils";
 export const metadata = { title: "Flock Health" };
 
 export default async function HealthPage() {
-  const supabase = await createServerClient();
+  const { orgId } = await getOrgContext();
+  const supabase = createServiceClient();
 
-  const [claims, vaccSched] = await Promise.all([
-    supabase.from("mortality_claims")
-      .select(`
-        id, reported_count, approved_count, claim_status, cause_of_death,
-        created_at,
-        farmer_flocks(flock_name, bird_category,
-          farmers(full_name, phone_number)
-        )
-      `)
-      .order("created_at", { ascending: false })
-      .limit(30),
-    supabase.from("vaccination_schedules")
-      .select(`
-        id, vaccine_name, scheduled_date, status,
-        farmer_flocks(flock_name,
-          farmers(full_name)
-        )
-      `)
-      .gte("scheduled_date", new Date().toISOString().slice(0, 10))
-      .order("scheduled_date", { ascending: true })
-      .limit(20),
-  ]);
+  const baseClaimsQ = orgId
+    ? supabase.from("mortality_claims")
+        .select(`
+          id, claimed_deaths, actual_deaths, status, cause_of_death,
+          created_at,
+          farmer_flocks(flock_code, bird_category,
+            farmers(full_name, phone_number)
+          )
+        `)
+        .eq("organization_id", orgId)
+        .order("created_at", { ascending: false })
+        .limit(30)
+    : Promise.resolve({ data: [], error: null });
 
-  const pending = claims.data?.filter(c => c.claim_status === "pending") ?? [];
-  const approved = claims.data?.filter(c => c.claim_status === "approved") ?? [];
-  const totalReported = claims.data?.reduce((s, c) => s + (c.reported_count ?? 0), 0) ?? 0;
+  const baseVaccQ = orgId
+    ? supabase.from("vaccination_schedules")
+        .select(`
+          id, vaccine_type, scheduled_date, completed_date,
+          farmer_flocks(flock_code,
+            farmers(full_name)
+          )
+        `)
+        .eq("organization_id", orgId)
+        .gte("scheduled_date", new Date().toISOString().slice(0, 10))
+        .order("scheduled_date", { ascending: true })
+        .limit(20)
+    : Promise.resolve({ data: [], error: null });
+
+  const [claims, vaccSched] = await Promise.all([baseClaimsQ, baseVaccQ]);
+
+  const pending = claims.data?.filter(c => c.status === "submitted" || c.status === "under_review") ?? [];
+  const approved = claims.data?.filter(c => c.status === "approved") ?? [];
+  const totalReported = claims.data?.reduce((s, c) => s + (c.claimed_deaths ?? 0), 0) ?? 0;
 
   return (
     <div className="page-enter space-y-6">
@@ -71,15 +79,15 @@ export default async function HealthPage() {
                 <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground text-sm">No claims yet</td></tr>
               ) : (
                 claims.data.map(c => {
-                  const flock = c.farmer_flocks as { flock_name: string; farmers?: { full_name: string } | null } | null;
+                  const flock = c.farmer_flocks as { flock_code: string; farmers?: { full_name: string } | null } | null;
                   return (
                     <tr key={c.id} className="hover:bg-muted/20">
-                      <td className="px-4 py-3">{flock?.flock_name ?? "—"}</td>
+                      <td className="px-4 py-3">{flock?.flock_code ?? "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{flock?.farmers?.full_name ?? "—"}</td>
-                      <td className="px-4 py-3 font-mono">{formatNumber(c.reported_count ?? 0)}</td>
-                      <td className="px-4 py-3 font-mono">{c.approved_count ? formatNumber(c.approved_count) : "—"}</td>
+                      <td className="px-4 py-3 font-mono">{formatNumber(c.claimed_deaths ?? 0)}</td>
+                      <td className="px-4 py-3 font-mono">{c.actual_deaths ? formatNumber(c.actual_deaths) : "—"}</td>
                       <td className="px-4 py-3 text-sm capitalize">{c.cause_of_death?.replace(/_/g, " ") ?? "—"}</td>
-                      <td className="px-4 py-3"><StatusBadge status={c.claim_status ?? "pending"} /></td>
+                      <td className="px-4 py-3"><StatusBadge status={c.status ?? "submitted"} /></td>
                       <td className="px-4 py-3 text-muted-foreground">{formatDate(c.created_at)}</td>
                     </tr>
                   );
@@ -107,12 +115,13 @@ export default async function HealthPage() {
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground text-sm">No upcoming vaccinations</td></tr>
               ) : (
                 vaccSched.data.map(v => {
-                  const flock = v.farmer_flocks as { flock_name: string; farmers?: { full_name: string } | null } | null;
+                  const flock = v.farmer_flocks as { flock_code: string; farmers?: { full_name: string } | null } | null;
                   const daysUntil = Math.ceil((new Date(v.scheduled_date).getTime() - Date.now()) / 86400_000);
+                  const vaccStatus = v.completed_date ? "completed" : daysUntil < 0 ? "overdue" : "scheduled";
                   return (
                     <tr key={v.id} className="hover:bg-muted/20">
-                      <td className="px-4 py-3 font-medium">{v.vaccine_name}</td>
-                      <td className="px-4 py-3">{flock?.flock_name ?? "—"}</td>
+                      <td className="px-4 py-3 font-medium">{v.vaccine_type}</td>
+                      <td className="px-4 py-3">{flock?.flock_code ?? "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{flock?.farmers?.full_name ?? "—"}</td>
                       <td className="px-4 py-3">
                         <p>{formatDate(v.scheduled_date)}</p>
@@ -120,7 +129,7 @@ export default async function HealthPage() {
                           {daysUntil === 0 ? "Today" : daysUntil > 0 ? `In ${daysUntil} day(s)` : `${Math.abs(daysUntil)} day(s) ago`}
                         </p>
                       </td>
-                      <td className="px-4 py-3"><StatusBadge status={v.status ?? "scheduled"} /></td>
+                      <td className="px-4 py-3"><StatusBadge status={vaccStatus} /></td>
                     </tr>
                   );
                 })

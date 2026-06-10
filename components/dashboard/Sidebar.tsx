@@ -3,9 +3,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  LayoutDashboard, Bird, Egg, Baby, Warehouse, Users,
+  LayoutDashboard, Bird, Egg, Baby, ShoppingBag, Users,
   Truck, BarChart3, Activity, LogOut, ChevronLeft, Menu, Wifi, WifiOff,
-  Building2,
+  Building2, Package, ClipboardList, CheckSquare, AlertTriangle,
+  ClipboardCheck, FileText, HeartHandshake, TrendingUp, Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -16,8 +17,17 @@ const navItems = [
   { href: "/flocks",     label: "Flocks",     icon: Bird },
   { href: "/eggs",       label: "Eggs",       icon: Egg },
   { href: "/hatchery",   label: "Hatchery",   icon: Baby },
-  { href: "/depot/pos",  label: "Depot POS",  icon: Warehouse },
-  { href: "/farmers",    label: "Farmers",    icon: Users },
+  { href: "/depot/pos",       label: "Sales Terminal", icon: ShoppingBag },
+  { href: "/depot/inventory", label: "Inventory",      icon: Package },
+  { href: "/depot/orders",    label: "Orders",         icon: ClipboardList },
+  { href: "/farmers",           label: "Farmers",     icon: Users },
+  { href: "/tasks",      label: "Tasks",      icon: CheckSquare },
+  { href: "/incidents",  label: "Incidents",  icon: AlertTriangle },
+  { href: "/inspections",label: "Inspections",icon: ClipboardCheck },
+  { href: "/documents",  label: "Documents",  icon: FileText },
+  { href: "/breeding",   label: "Breeding",   icon: HeartHandshake },
+  { href: "/production", label: "Production", icon: TrendingUp },
+  { href: "/expenses",   label: "Expenses",   icon: Receipt },
   { href: "/dispatch",   label: "Dispatch",   icon: Truck },
   { href: "/analytics",  label: "Analytics",  icon: BarChart3 },
   { href: "/health",     label: "Health",     icon: Activity },

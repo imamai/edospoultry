@@ -34,3 +34,21 @@ export function createServiceClient() {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 }
+
+/**
+ * Returns { userId, orgId } for the current session.
+ * Uses the anon client so it respects auth but reads only the caller's own profile row
+ * (profiles policy: id = auth.uid() — no recursion risk).
+ * Use this to get orgId, then query data with createServiceClient() + explicit org filter.
+ */
+export async function getOrgContext(): Promise<{ userId: string | null; orgId: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { userId: null, orgId: null };
+  const { data } = await supabase
+    .from("profiles")
+    .select("organization_id")
+    .eq("id", user.id)
+    .single();
+  return { userId: user.id, orgId: (data as { organization_id: string } | null)?.organization_id ?? null };
+}
